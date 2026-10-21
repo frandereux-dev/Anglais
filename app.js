@@ -1,10 +1,16 @@
 "use strict";
 /* ================= DONNÉES ================= */
 const WORDS = [], SENTS = [];
-for (const l in DATA.words) for (const s of DATA.words[l]) { const [en, fr] = s.split("|"); const a = en.split("/"); WORDS.push({ id: "w:" + a[0], en: a, fr, l: +l }); }
-for (const l in DATA.sents) DATA.sents[l].forEach((s, i) => { const [en, fr] = s.split("|"); SENTS.push({ id: `s:${l}:${i}`, en: en.split("/"), fr, l: +l }); });
-const DIALOGS = DATA.dialogs.map((d, i) => ({ ...d, id: "d:" + i }));
-const QUESTIONS = DATA.questions.map((q, i) => ({ ...q, id: "q:" + i }));
+const BANDS = ["A1", "A2", "B1", "B2"];
+BANDS.forEach((B, bi) => {
+  const lines = WORDLIST[B].trim().split("\n"), half = Math.ceil(lines.length / 2);
+  lines.forEach((s, i) => { const [en, fr] = s.split("|"); const a = en.split("/"); WORDS.push({ id: "w:" + a[0], en: a, fr, l: bi * 2 + (i < half ? 1 : 2) }); });
+  if (PHRASES[B]) PHRASES[B].trim().split("\n").forEach(s => { const [en, fr] = s.split("|"); WORDS.push({ id: "w:" + en, en: [en], fr, l: bi * 2 + 2 }); });
+});
+for (const l in SENTLIST) SENTLIST[l].forEach(s => { const [en, fr] = s.split("|"); const a = en.split("/"); SENTS.push({ id: "s:" + a[0], en: a, fr, l: +l }); });
+const DIALOGS = [...DATA.dialogs, ...MORE_DIALOGS].map((d, i) => ({ ...d, id: "d:" + d.lines[0] }));
+const QUESTIONS = [...DATA.questions, ...MORE_QUESTIONS].map(q => ({ ...q, id: "q:" + q.q }));
+const LEVELS = ["A1", "A1+", "A2", "A2+", "B1", "B1+", "B2", "B2+"];
 const SKILLS = { listen: "Comprendre", speak: "Parler", vocab: "Vocabulaire", write: "Écrire" };
 
 /* ================= ÉTAT ================= */
@@ -24,8 +30,9 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;"
 const shuffle = a => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const pick = a => a[Math.floor(Math.random() * a.length)];
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
-const CEFR = x => x < 2.5 ? "A1" : x < 4 ? "A1+" : x < 5.5 ? "A2" : x < 7 ? "A2+" : x < 8.5 ? "B1" : "B1+";
-const maxLevel = sk => clamp(Math.round(1 + (S.sk[sk] - 1) * 5 / 9), 1, 6);
+const lvlOf = x => clamp(Math.round(1 + (x - 1) * 7 / 9), 1, 8);
+const CEFR = x => LEVELS[lvlOf(x) - 1];
+const maxLevel = sk => lvlOf(S.sk[sk]);
 
 const CONTR = { "i'm": "i am", "you're": "you are", "he's": "he is", "she's": "she is", "it's": "it is", "we're": "we are", "they're": "they are", "that's": "that is", "don't": "do not", "doesn't": "does not", "didn't": "did not", "can't": "can not", "cannot": "can not", "won't": "will not", "i'd": "i would", "you'd": "you would", "we'd": "we would", "i'll": "i will", "we'll": "we will", "isn't": "is not", "aren't": "are not", "wasn't": "was not", "weren't": "were not", "haven't": "have not", "hasn't": "has not", "i've": "i have", "we've": "we have", "let's": "let us", "what's": "what is", "where's": "where is", "there's": "there is", "how's": "how is" };
 const NUMS = { 0: "zero", 1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen", 14: "fourteen", 15: "fifteen", 16: "sixteen", 17: "seventeen", 18: "eighteen", 19: "nineteen", 20: "twenty", 30: "thirty", 40: "forty", 50: "fifty" };
@@ -111,11 +118,16 @@ const ICON = {
 /* ================= MÉMOIRE (révisions espacées) ================= */
 const rec = id => S.items[id];
 function gradeItem(id, ok) {
+  if (sess && sess.placement) return;
   const w = S.items[id] || { b: 0, d: 0 };
   if (ok) w.b = Math.min(6, w.b + 1); else w.b = w.b > 1 ? Math.floor(w.b / 2) : 1;
   w.d = dayNum() + INTERVALS[w.b]; S.items[id] = w;
 }
 function gradeSkill(sk, ok, help) {
+  if (sess && sess.placement) { // test de niveau : on cherche vite le bon palier
+    const step = Math.max(0.45, 1.3 - (sess.stats[sk]?.n || 0) * 0.15);
+    S.sk[sk] = clamp(S.sk[sk] + (ok ? step * (help ? 0.5 : 1) : -step * 0.8), 1, 10); return;
+  }
   if (ok) {
     S.run[sk] = (S.run[sk] || 0) + 1;
     let g = 0.22 * (help ? 0.4 : 1);
@@ -139,6 +151,7 @@ let sess = null, recent = [];
 function weights() {
   const w = { listen: soundOK() ? 0.35 : 0, speak: micOK() ? 0.3 : 0, vocab: 0.2, write: 0.15 };
   const act = Object.keys(w).filter(k => w[k] > 0), avg = act.reduce((s, k) => s + S.sk[k], 0) / act.length;
+  if (sess && sess.placement) { for (const k of act) w[k] = 1; return w; }
   for (const k of act) w[k] *= 1 + clamp((avg - S.sk[k]) / 4, -0.4, 0.8); // on renforce la compétence la plus faible
   return w;
 }
@@ -170,10 +183,11 @@ function nextItem() {
 }
 function vocabItem() {
   const sk = "vocab", top = maxLevel(sk), t = dayNum();
+  if (sess.placement) { const w = pick(WORDS.filter(x => x.l === top && !recent.includes(x.id))); return { t: top >= 5 ? "v_type" : Math.random() < 0.5 ? "v_mcq_ef" : "v_mcq_fe", w, sk }; }
   const due = shuffle(WORDS.filter(w => rec(w.id) && rec(w.id).d <= t && !recent.includes(w.id))).sort((a, b) => rec(a.id).b - rec(b.id).b);
   if (due.length && (sess.newCount >= sess.newMax || Math.random() < 0.65)) return vocabQuiz(due[0]);
   if (sess.newCount < sess.newMax) {
-    const nw = WORDS.filter(w => !rec(w.id) && w.l <= top).sort((a, b) => a.l - b.l)[0];
+    const nw = WORDS.filter(w => !rec(w.id) && w.l <= top && w.l >= Math.max(1, top - 2)).sort((a, b) => a.l - b.l)[0] || WORDS.find(w => !rec(w.id) && w.l <= top);
     if (nw) { sess.newCount++; sess.queue.push({ wait: 2, item: { t: "v_mcq_ef", w: nw, sk } }); return { t: "v_intro", w: nw, sk }; }
   }
   const seen = shuffle(WORDS.filter(w => rec(w.id) && !recent.includes(w.id))).sort((a, b) => rec(a.id).b - rec(b.id).b);
@@ -183,6 +197,27 @@ function vocabQuiz(w) {
   const b = rec(w.id)?.b || 0, L = S.sk.vocab;
   const t = b <= 1 ? "v_mcq_ef" : b === 2 ? "v_mcq_fe" : L >= 4 ? "v_type" : "v_mcq_fe";
   return { t, w, sk: "vocab" };
+}
+
+/* ================= DICTIONNAIRE AU TOUCHER ================= */
+const DICT = {}, DICTV = {};
+for (const w of WORDS) for (const e of w.en) { const isV = /^to /i.test(e), k = e.toLowerCase().replace(/^to /, ""); if (k.includes(" ")) continue; if (isV && !DICTV[k]) DICTV[k] = w.fr; if (!DICT[k]) DICT[k] = w.fr; }
+Object.assign(DICT, Object.fromEntries(Object.entries({ should: "devrait (conseil)", could: "pourrait", would: "conditionnel (-rais)", must: "devoir (obligation)", might: "pourrait (peut-être)", will: "futur (-ra)", can: "pouvoir", about: "à propos de / environ", before: "avant", after: "après", until: "jusqu'à", during: "pendant", without: "sans", with: "avec", for: "pour / depuis", since: "depuis", ago: "il y a", still: "encore / toujours", just: "juste / venir de", ever: "déjà / jamais", something: "quelque chose", someone: "quelqu'un", nothing: "rien", everything: "tout", everyone: "tout le monde", anything: "quelque chose / rien", each: "chaque", every: "chaque", other: "autre", another: "un autre", own: "propre", such: "tel", which: "lequel / qui", whose: "dont / à qui", than: "que (comparaison)", then: "puis / alors", there: "là / il y a", these: "ces", those: "ces (là-bas)", into: "dans (mouvement)", through: "à travers", over: "au-dessus / fini", under: "sous", between: "entre", against: "contre", towards: "vers", already: "déjà", yet: "encore / déjà", soon: "bientôt", once: "une fois", twice: "deux fois", both: "les deux", few: "peu de", less: "moins", more: "plus", most: "la plupart / le plus", much: "beaucoup", many: "beaucoup de", some: "du / quelques", any: "du / aucun", next: "prochain", last: "dernier", first: "premier", only: "seulement", even: "même", ago: "il y a" }).filter(([k]) => !DICT[k])));
+const IRREG = { went: "go", gone: "go", ate: "eat", eaten: "eat", got: "get", forgot: "forget", forgotten: "forget", lost: "lose", found: "find", bought: "buy", told: "tell", said: "say", came: "come", took: "take", taken: "take", left: "leave", made: "make", had: "have", has: "have", was: "be", were: "be", been: "be", is: "be", are: "be", am: "be", broke: "break", broken: "break", saw: "see", seen: "see", thought: "think", gave: "give", given: "give", felt: "feel", slept: "sleep", spoke: "speak", spent: "spend", met: "meet", knew: "know", known: "know", wrote: "write", written: "write", ran: "run", drove: "drive", sat: "sit", stood: "stand", woke: "wake", paid: "pay", sent: "send", kept: "keep", brought: "bring", heard: "hear", read: "read", built: "build", fell: "fall", won: "win", began: "begin", chose: "choose", stole: "steal", children: "child", men: "man", women: "woman", feet: "foot", teeth: "tooth", better: "good", best: "good", worse: "bad", worst: "bad" };
+function lookup(word) {
+  const w = word.toLowerCase().replace(/[^a-z'-]/g, "").replace(/'s$/, "");
+  if (!w) return null;
+  if (IRREG[w] && DICTV[IRREG[w]]) return { base: IRREG[w], fr: DICTV[IRREG[w]] };
+  for (const c of [w.replace(/ied$/, "y"), w.replace(/ed$/, ""), w.replace(/d$/, ""), w.replace(/([a-z])\1ed$/, "$1"), w.replace(/ing$/, ""), w.replace(/ing$/, "e"), w.replace(/([a-z])\1ing$/, "$1")]) if (c !== w && DICTV[c]) return { base: c, fr: DICTV[c] };
+  const cands = [w, IRREG[w], w.replace(/ier$/, "y"), w.replace(/iest$/, "y"), w.replace(/ies$/, "y"), w.replace(/es$/, ""), w.replace(/s$/, ""), w.replace(/ied$/, "y"), w.replace(/ed$/, ""), w.replace(/d$/, ""), w.replace(/ing$/, ""), w.replace(/ing$/, "e"), w.replace(/([a-z])\1ing$/, "$1"), w.replace(/([a-z])\1ed$/, "$1"), w.replace(/er$/, ""), w.replace(/est$/, ""), w.replace(/ly$/, "")];
+  for (const c of cands) if (c && DICT[c]) return { base: c, fr: DICT[c] };
+  return null;
+}
+function linkify(text) {
+  return text.split(/(\s+)/).map(tok => { const m = lookup(tok); return m ? `<button class="wd" data-b="${esc(m.base)}" data-f="${esc(m.fr)}">${esc(tok)}</button>` : esc(tok); }).join("");
+}
+function bindWords() {
+  $$(".wd").forEach(b => b.onclick = e => { e.stopPropagation(); const o = $("#wdout"); if (o) { o.hidden = false; o.textContent = `${b.dataset.b} = ${b.dataset.f}`; } say(b.dataset.b); });
 }
 
 /* ================= ÉCRANS ================= */
@@ -208,10 +243,13 @@ function home() {
       ${S.canSpeak && !SR ? `<div class="banner">Ce navigateur ne reconnaît pas la voix. Ouvre l'appli dans Chrome pour les exercices de micro.</div>` : ""}
 
       <button class="btn" id="go">Commencer</button>
+      <button class="btn ghost" id="place">${S.placed ? "Refaire le test de niveau" : "Faire le test de niveau (7 min)"}</button>
+      ${S.placed ? "" : `<p class="note" style="margin:0">Conseillé avant ta première séance : il règle ton point de départ dans les 4 compétences.</p>`}
     </section>
     <section class="card">
       <details><summary>Comment l'appli s'adapte</summary>
         <p>4 compétences évoluent séparément. Si tu enchaînes 5 bonnes réponses, la compétence monte nettement. Ce qui augmente avec ton niveau : la vitesse de la voix, la longueur des phrases, le nombre de mots pièges, et les exercices eux-mêmes (choix multiple, puis dictée, puis traduction orale chronométrée).</p>
+        <p>Le contenu va de A1 à B2 : plus de 1 100 mots du quotidien, classés selon le niveau CECR que leur donne l'Oxford 3000/5000, et environ 190 phrases rangées selon la grammaire de chaque niveau. Le niveau affiché reste une estimation : pour un niveau officiel, passe un test comme l'EF SET.</p>
         <p>Chaque mot et chaque phrase reviennent selon ta mémoire : 1, 2, 4, 7, 15 puis 30 jours si tu réussis, plus vite si tu te trompes. La séance travaille plus la compétence la plus faible.</p>
       </details>
       <details><summary>Sauvegarde</summary>
@@ -224,20 +262,25 @@ function home() {
   $$("[data-dur]").forEach(b => b.onclick = () => { S.dur = +b.dataset.dur; save(); home(); });
   $("#tSpeak").onclick = () => { S.canSpeak = !S.canSpeak; save(); home(); };
   $("#tSound").onclick = () => { S.sound = !S.sound; save(); home(); };
-  $("#go").onclick = start;
+  $("#go").onclick = () => start(false);
+  $("#place").onclick = () => start(true);
   $("#exp").onclick = () => { const b = new Blob([JSON.stringify(S)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `stepup-sauvegarde-${new Date().toISOString().slice(0, 10)}.json`; document.body.appendChild(a); a.click(); a.remove(); };
   $("#imp").onchange = e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => { try { const d = JSON.parse(r.result); if (d.v !== 2) throw 0; S = { ...fresh(), ...d }; save(); home(); } catch (err) { $("#impmsg").textContent = "Fichier non reconnu : choisis un fichier exporté depuis Step Up English."; } }; r.readAsText(f); };
 }
 
 /* ================= SÉANCE ================= */
-function start() {
+function start(placement) {
+  placement = placement === true;
   if (hasTTS) { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(""); speechSynthesis.speak(u); } catch (e) {} }
-  sess = { t0: Date.now(), end: Date.now() + S.dur * 60000, queue: [], lastSk: [], newCount: 0, newMax: Math.round(S.dur * 0.6), stats: {}, before: { ...S.sk }, n: 0, cur: null };
+  const prevSk = { ...S.sk };
+  if (placement) S.sk = { listen: 4, speak: 4, vocab: 4, write: 4 };
+  const mins = placement ? 7 : S.dur;
+  sess = { placement, maxItems: placement ? 32 : Infinity, t0: Date.now(), end: Date.now() + mins * 60000, dur: mins, queue: [], lastSk: [], newCount: 0, newMax: placement ? 0 : Math.round(S.dur * 0.6), stats: {}, before: { ...S.sk }, prevSk, n: 0, cur: null };
   recent = [];
   nextOrFinish();
 }
 function nextOrFinish() {
-  if (Date.now() >= sess.end) return finish();
+  if (Date.now() >= sess.end || sess.n >= sess.maxItems) return finish();
   sess.cur = nextItem(); sess.n++;
   const id = sess.cur.w?.id || sess.cur.s?.id || sess.cur.d?.id || sess.cur.q?.id; if (id) { recent.push(id); if (recent.length > 8) recent.shift(); }
   window.scrollTo(0, 0); renderItem();
@@ -254,7 +297,7 @@ function renderItem() {
 }
 function tick() {
   if (!sess || !$("#clock")) return;
-  const left = Math.max(0, sess.end - Date.now()), tot = S.dur * 60000;
+  const left = Math.max(0, sess.end - Date.now()), tot = sess.dur * 60000;
   $("#clock").textContent = `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, "0")}`;
   $("#tbar").style.width = `${Math.round((1 - left / tot) * 100)}%`;
 }
@@ -276,15 +319,27 @@ function result(it, ok, shown, opts = {}) {
   const id = it.w?.id || it.s?.id || it.d?.id; if (id) gradeItem(id, ok);
   if (!ok && !it.retry) sess.queue.push({ wait: 3, item: { ...it, retry: true } });
   save();
+  const trTxt = translationFor(it);
+  if (trTxt) opts.noAuto = true; // le temps de lire la traduction
   const title = ok ? (opts.partial ? "Presque" : opts.typo ? "Juste, petite faute de frappe" : "Juste") : "Faux";
   const cls = ok ? (opts.partial ? "mid" : "ok") : "ko";
   const showAns = !ok || opts.typo || opts.partial || opts.always;
-  foot(`<div class="fb"><h3>${title}</h3>${showAns && shown ? `<p>${opts.prefix || "Réponse :"} <b>${esc(shown)}</b></p>` : ""}${opts.extra || ""}</div>
+  foot(`<div class="fb"><h3>${title}</h3>${showAns && shown ? `<p>${opts.prefix || "Réponse :"} <b>${it.s ? linkify(shown) : esc(shown)}</b></p>` : ""}${opts.extra || ""}${trTxt ? `<p class="tr">Traduction : ${esc(trTxt)}</p>` : ""}</div>
+    ${it.s || it.d ? `<p class="note" style="margin:0">Touche un mot anglais pour voir sa traduction.</p><p class="wdout" id="wdout" hidden></p>` : ""}
     <button class="btn" id="cont">Continuer</button>`, cls);
+  bindWords();
   $("#cont").onclick = nextOrFinish;
   if (ok && !opts.partial && !opts.typo && S.autoNext && !opts.noAuto) setTimeout(() => { if (sess && sess.state === "done" && $("#cont")) nextOrFinish(); }, 1100);
 }
 
+const FR_VISIBLE = ["w_type", "w_build", "s_trans", "v_mcq_fe", "v_mcq_ef", "v_type", "l_mcq", "l_word", "l_dialog"];
+function translationFor(it) {
+  if (FR_VISIBLE.includes(it.t)) return "";
+  if (it.s) return it.s.fr;
+  if (it.p) return it.p.map(x => `${x} = ${DATA.pairFr[x] || "?"}`).join(" · ");
+  if (it.q) return it.q.fr;
+  return "";
+}
 function distract(w, k, field) {
   const pool = WORDS.filter(x => x.id !== w.id && Math.abs(x.l - w.l) <= 1);
   const out = [], seen = new Set([field(w)]);
@@ -351,7 +406,7 @@ const EX = {
     const play = slow => { if (slow) sess.help = true; sayDialog(d.lines, slow); };
     mcq(it, `<div class="audio" style="justify-content:center"><button class="spk big" id="dplay" aria-label="Réécouter le dialogue">${ICON.spk}</button><button class="linkbtn" id="dslow">Lentement</button></div><p class="prompt sm" style="margin:0">${esc(d.q)}</p>`,
       "Écoute le dialogue", ans, shuffle(d.o), ok => {
-        const extra = `<div class="dlg" style="margin-top:8px">${d.lines.map(l => `<div>${esc(l)}</div>`).join("")}</div>`;
+        const extra = `<div class="dlg" style="margin-top:8px">${d.lines.map((l, k) => `<div>${linkify(l)}${d.tr ? `<br><span class="note">${esc(d.tr[k])}</span>` : ""}</div>`).join("")}</div>`;
         result(it, ok, ok ? "" : ans, { extra, noAuto: true });
       });
     $("#dplay").onclick = () => play(false); $("#dslow").onclick = () => play(true);
@@ -442,7 +497,7 @@ function answerEx(it) {
   $("#tr").onclick = () => { $("#trtxt").hidden = false; sess.help = true; };
   foot(`<button class="btn ghost" id="skip">Je ne sais pas</button>`);
   const showSelf = heard => {
-    foot(`<div class="fb"><h3>Compare avec un exemple</h3><p class="note" style="margin:2px 0">Toi : « ${esc(heard)} »</p><p>Exemple : <b>${esc(q.ex)}</b></p></div>
+    foot(`<div class="fb"><h3>Compare avec un exemple</h3><p class="note" style="margin:2px 0">Toi : « ${esc(heard)} »</p><p>Exemple : <b>${esc(q.ex)}</b></p><p class="tr">Question : ${esc(q.fr)}</p></div>
       <div class="row"><button class="btn ghost" id="no">Pas vraiment</button><button class="btn" id="yes">J'ai bien répondu</button></div>`, "mid");
     $("#yes").onclick = () => { sess.state = "ask"; result(it, true, "", { noAuto: false }); };
     $("#no").onclick = () => { sess.state = "ask"; result(it, false, q.ex, { prefix: "Exemple :" }); };
@@ -467,6 +522,8 @@ function finish(early) {
   clearInterval(clockT); hasTTS && speechSynthesis.cancel(); recognize.stop && recognize.stop();
   if (!sess) return home();
   const mins = Math.round((Date.now() - sess.t0) / 60000);
+  const wasPlacement = sess.placement && !early; if (wasPlacement) S.placed = true;
+  if (sess.placement && early) S.sk = sess.prevSk; // test interrompu : on garde l'ancien niveau
   const t = dayNum(); if (sess.n > 1 && !S.days.includes(t)) S.days.push(t);
   S.minutes += mins; save();
   const rows = Object.entries(SKILLS).map(([k, n]) => {
@@ -477,7 +534,8 @@ function finish(early) {
   const weak = Object.keys(SKILLS).filter(k => sess.stats[k]).sort((a, b) => (sess.stats[a].ok / sess.stats[a].n) - (sess.stats[b].ok / sess.stats[b].n))[0];
   sess = null;
   $("#app").innerHTML = `<header class="top"><div class="brand">Step Up <span>English</span></div></header><main>
-    <section class="card"><h2 style="font-size:24px">${early ? "Séance arrêtée" : "Séance terminée"} · ${mins} min</h2>
+    <section class="card"><h2 style="font-size:24px">${wasPlacement ? "Test de niveau terminé" : early ? "Séance arrêtée" : "Séance terminée"} · ${mins} min</h2>
+    ${wasPlacement ? `<p style="margin:0">Ton point de départ est réglé. Les séances partiront de ces niveaux et s'ajusteront ensuite à chaque réponse.</p>` : ""}
     ${rows ? `<div class="res"><span class="label">Compétence</span><span class="label">Réussi</span><span class="label">Niveau</span>${rows}</div>` : `<p class="note">Aucun exercice fait.</p>`}
     ${weak ? `<p class="note" style="margin:0">À travailler : ${SKILLS[weak].toLowerCase()}. La prochaine séance en mettra davantage.</p>` : ""}</section>
     <button class="btn" id="home">Retour</button></main>`;
