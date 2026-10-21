@@ -1,4 +1,5 @@
 "use strict";
+const VERSION = "4";
 /* ================= DONNÉES ================= */
 const WORDS = [], SENTS = [];
 const BANDS = ["A1", "A2", "B1", "B2"];
@@ -203,6 +204,7 @@ function vocabQuiz(w) {
 const DICT = {}, DICTV = {};
 for (const w of WORDS) for (const e of w.en) { const isV = /^to /i.test(e), k = e.toLowerCase().replace(/^to /, ""); if (k.includes(" ")) continue; if (isV && !DICTV[k]) DICTV[k] = w.fr; if (!DICT[k]) DICT[k] = w.fr; }
 Object.assign(DICT, Object.fromEntries(Object.entries({ should: "devrait (conseil)", could: "pourrait", would: "conditionnel (-rais)", must: "devoir (obligation)", might: "pourrait (peut-être)", will: "futur (-ra)", can: "pouvoir", about: "à propos de / environ", before: "avant", after: "après", until: "jusqu'à", during: "pendant", without: "sans", with: "avec", for: "pour / depuis", since: "depuis", ago: "il y a", still: "encore / toujours", just: "juste / venir de", ever: "déjà / jamais", something: "quelque chose", someone: "quelqu'un", nothing: "rien", everything: "tout", everyone: "tout le monde", anything: "quelque chose / rien", each: "chaque", every: "chaque", other: "autre", another: "un autre", own: "propre", such: "tel", which: "lequel / qui", whose: "dont / à qui", than: "que (comparaison)", then: "puis / alors", there: "là / il y a", these: "ces", those: "ces (là-bas)", into: "dans (mouvement)", through: "à travers", over: "au-dessus / fini", under: "sous", between: "entre", against: "contre", towards: "vers", already: "déjà", yet: "encore / déjà", soon: "bientôt", once: "une fois", twice: "deux fois", both: "les deux", few: "peu de", less: "moins", more: "plus", most: "la plupart / le plus", much: "beaucoup", many: "beaucoup de", some: "du / quelques", any: "du / aucun", next: "prochain", last: "dernier", first: "premier", only: "seulement", even: "même", ago: "il y a" }).filter(([k]) => !DICT[k])));
+Object.assign(DICT, Object.fromEntries(Object.entries({ one: "un", two: "deux", three: "trois", four: "quatre", five: "cinq", six: "six", seven: "sept", eight: "huit", nine: "neuf", ten: "dix", eleven: "onze", twelve: "douze", fifteen: "quinze", twenty: "vingt", thirty: "trente", hundred: "cent", thousand: "mille", english: "anglais", french: "français", france: "France", london: "Londres", monday: "lundi", tuesday: "mardi", wednesday: "mercredi", thursday: "jeudi", friday: "vendredi", saturday: "samedi", sunday: "dimanche", i: "je", you: "tu / vous", he: "il", she: "elle", we: "nous", they: "ils / elles", it: "il / ça", my: "mon / ma", your: "ton / votre", his: "son (à lui)", her: "son (à elle) / la", our: "notre", their: "leur", me: "me / moi", him: "le / lui", us: "nous", them: "les / eux", the: "le / la / les", a: "un / une", an: "un / une", this: "ce / cette", that: "ce / que", in: "dans / en", on: "sur", at: "à", to: "à / vers", from: "de (provenance)", of: "de", by: "par / en", not: "ne... pas", and: "et", so: "donc / si", as: "comme" }).filter(([k]) => !DICT[k])));
 const IRREG = { went: "go", gone: "go", ate: "eat", eaten: "eat", got: "get", forgot: "forget", forgotten: "forget", lost: "lose", found: "find", bought: "buy", told: "tell", said: "say", came: "come", took: "take", taken: "take", left: "leave", made: "make", had: "have", has: "have", was: "be", were: "be", been: "be", is: "be", are: "be", am: "be", broke: "break", broken: "break", saw: "see", seen: "see", thought: "think", gave: "give", given: "give", felt: "feel", slept: "sleep", spoke: "speak", spent: "spend", met: "meet", knew: "know", known: "know", wrote: "write", written: "write", ran: "run", drove: "drive", sat: "sit", stood: "stand", woke: "wake", paid: "pay", sent: "send", kept: "keep", brought: "bring", heard: "hear", read: "read", built: "build", fell: "fall", won: "win", began: "begin", chose: "choose", stole: "steal", children: "child", men: "man", women: "woman", feet: "foot", teeth: "tooth", better: "good", best: "good", worse: "bad", worst: "bad" };
 function lookup(word) {
   const w = word.toLowerCase().replace(/[^a-z'-]/g, "").replace(/'s$/, "");
@@ -217,7 +219,7 @@ function linkify(text) {
   return text.split(/(\s+)/).map(tok => { const m = lookup(tok); return m ? `<button class="wd" data-b="${esc(m.base)}" data-f="${esc(m.fr)}">${esc(tok)}</button>` : esc(tok); }).join("");
 }
 function bindWords() {
-  $$(".wd").forEach(b => b.onclick = e => { e.stopPropagation(); const o = $("#wdout"); if (o) { o.hidden = false; o.textContent = `${b.dataset.b} = ${b.dataset.f}`; } say(b.dataset.b); });
+  $$(".wd").forEach(b => b.onclick = e => { e.stopPropagation(); if (sess && sess.state === "ask") sess.help = true; const o = $("#wdout"); if (o) { o.hidden = false; o.textContent = `${b.dataset.b} = ${b.dataset.f}`; } say(b.dataset.b); });
 }
 
 /* ================= ÉCRANS ================= */
@@ -258,6 +260,7 @@ function home() {
         <p class="note" id="impmsg"></p>
       </details>
     </section>
+    <p class="note" style="text-align:center;margin:0">Version ${VERSION}</p>
   </main>`;
   $$("[data-dur]").forEach(b => b.onclick = () => { S.dur = +b.dataset.dur; save(); home(); });
   $("#tSpeak").onclick = () => { S.canSpeak = !S.canSpeak; save(); home(); };
@@ -412,7 +415,7 @@ const EX = {
     $("#dplay").onclick = () => play(false); $("#dslow").onclick = () => play(true);
     setTimeout(() => play(false), 300);
   },
-  s_repeat(it) { speakEx(it, `<div class="prompt sm">${esc(it.s.en[0])}</div><div class="note">${esc(it.s.fr)}</div>${audioBtns(it.s.en[0])}`, "Écoute, puis répète la phrase", it.s.en, true); bindAudio(it.s.en[0]); say(it.s.en[0]); },
+  s_repeat(it) { speakEx(it, `<div class="prompt sm">${linkify(it.s.en[0])}</div>${HINT}${audioBtns(it.s.en[0])}`, "Écoute, puis répète la phrase", it.s.en, true); bindAudio(it.s.en[0]); bindWords(); say(it.s.en[0]); },
   s_echo(it) { speakEx(it, `${audioBtns(it.s.en[0], true)}<p class="note" style="text-align:center;margin:0">Le texte s'affiche après ta réponse.</p>`, "Écoute et répète, sans lire", it.s.en, true); bindAudio(it.s.en[0]); setTimeout(() => say(it.s.en[0]), 250); },
   s_trans(it) {
     const words = it.s.en[0].split(" ").length, secs = Math.round(clamp(16 - S.sk.speak, 5, 14) + words * 0.5);
@@ -450,6 +453,7 @@ function build(it, promptHtml, kind, level, isListen) {
   $("#chk").onclick = () => { if (sess.state !== "ask") return; const txt = line.map(b => b.t).join(" "); const r = checkText(txt, s.en); say(s.en[0]); result(it, r.ok && !r.typo, s.en[0], { always: isListen }); };
 }
 
+const HINT = `<p class="note" style="margin:0">Touche un mot pour voir sa traduction.</p><p class="wdout" id="wdout" hidden></p>`;
 function micUI() {
   return `<button class="mic" id="mic" aria-label="Appuie et parle">${ICON.mic}</button><div class="heard" id="heard"><span class="note">Appuie sur le micro, puis parle</span></div>`;
 }
@@ -490,10 +494,10 @@ function speakEx(it, promptHtml, kind, answers, hideAnswerUntil, secs) {
 }
 function answerEx(it) {
   const q = it.q;
-  $("#stage").innerHTML = `${head("Réponds à voix haute, avec une phrase complète", it.sk)}<div class="prompt sm">${esc(q.q)}</div>
+  $("#stage").innerHTML = `${head("Réponds à voix haute, avec une phrase complète", it.sk)}<div class="prompt sm">${linkify(q.q)}</div>${HINT}
     ${soundOK() ? `<div class="audio"><button class="spk" data-say="n">${ICON.spk} Écouter</button><button class="linkbtn" id="tr">Voir la traduction</button></div>` : `<button class="linkbtn" id="tr" style="justify-self:start">Voir la traduction</button>`}
     <p class="note" id="trtxt" hidden>${esc(q.fr)}</p>${micUI()}`;
-  bindAudio(q.q); say(q.q);
+  bindAudio(q.q); bindWords(); say(q.q);
   $("#tr").onclick = () => { $("#trtxt").hidden = false; sess.help = true; };
   foot(`<button class="btn ghost" id="skip">Je ne sais pas</button>`);
   const showSelf = heard => {
@@ -543,5 +547,9 @@ function finish(early) {
 }
 
 /* ================= DÉMARRAGE ================= */
-if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  const hadController = !!navigator.serviceWorker.controller; let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadController && !reloaded && !sess) { reloaded = true; location.reload(); } });
+  navigator.serviceWorker.register("sw.js").then(r => r.update()).catch(() => {});
+}
 home();
