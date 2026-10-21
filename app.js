@@ -65,8 +65,12 @@ function speechScore(heard, target) {
 const hasTTS = "speechSynthesis" in window;
 let voices = [];
 function loadVoices() { if (!hasTTS) return; const v = speechSynthesis.getVoices(); const us = v.filter(x => /en[-_]US/i.test(x.lang)), gb = v.filter(x => /en[-_]GB/i.test(x.lang)), any = v.filter(x => /^en/i.test(x.lang)); voices = [...us, ...gb, ...any.filter(x => !us.includes(x) && !gb.includes(x))]; }
-if (hasTTS) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
-const soundOK = () => S.sound && hasTTS && voices.length > 0;
+if (hasTTS) {
+  loadVoices();
+  speechSynthesis.onvoiceschanged = () => { const had = voices.length; loadVoices(); if (!had && voices.length && !sess) home(); };
+  let tries = 0; const poll = setInterval(() => { tries++; const had = voices.length; loadVoices(); if (!had && voices.length && !sess) home(); if (voices.length || tries > 20) clearInterval(poll); }, 400);
+}
+const soundOK = () => S.sound && hasTTS;
 const baseRate = () => clamp(0.72 + (S.sk.listen - 1) * 0.055, 0.7, 1.2);
 function say(text, opt = {}) {
   return new Promise(res => {
@@ -74,7 +78,7 @@ function say(text, opt = {}) {
     try {
       if (!opt.queue) speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text); const v = voices[opt.voice || 0] || voices[0];
-      u.voice = v; u.lang = v.lang; u.rate = opt.slow ? 0.62 : baseRate(); u.pitch = opt.pitch || 1;
+      if (v) { u.voice = v; u.lang = v.lang; } else u.lang = "en-US"; u.rate = opt.slow ? 0.62 : baseRate(); u.pitch = opt.pitch || 1;
       u.onend = u.onerror = () => res(); speechSynthesis.speak(u);
       setTimeout(res, 2500 + text.length * 120);
     } catch (e) { res(); }
@@ -202,7 +206,7 @@ function home() {
         <button class="toggle" role="switch" id="tSound" aria-checked="${S.sound}"><span><b>J'ai le son</b><br><span class="note">Haut-parleur ou écouteurs.</span></span><span class="sw"></span></button>
       </div>
       ${S.canSpeak && !SR ? `<div class="banner">Ce navigateur ne reconnaît pas la voix. Ouvre l'appli dans Chrome pour les exercices de micro.</div>` : ""}
-      ${S.sound && hasTTS && !voices.length ? `<div class="banner">Aucune voix anglaise trouvée sur ce téléphone. Dans les paramètres Android, installe la voix anglaise de « Synthèse vocale Google ».</div>` : ""}
+
       <button class="btn" id="go">Commencer</button>
     </section>
     <section class="card">
@@ -483,4 +487,3 @@ function finish(early) {
 /* ================= DÉMARRAGE ================= */
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 home();
-if (hasTTS) setTimeout(() => { if (!sess) home(); }, 800); // les voix arrivent parfois après le chargement
